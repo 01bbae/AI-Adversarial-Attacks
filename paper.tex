@@ -1,0 +1,98 @@
+\documentclass{article}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\DeclareMathOperator{\sgn}{sgn}
+\DeclareMathOperator{\Lagr}{\mathcal{L}}
+\DeclareMathOperator*{\argmax}{argmax}
+
+\title{Homework 1: Adversarial Attack}
+\author{Byung Jae Bae\\2023952231}
+
+\begin{document}
+\maketitle
+\section{Question 1}
+
+To use KKT conditions to show that $x\prime = x + r^\ast$ 
+can be expressed by $x\prime = x + \epsilon \cdot \sgn(\nabla_{x}L(x,y))$, 
+we first define the optimization problem as:
+\begin{equation}
+    r^\ast \in argmax_{r \in \mathbb{R}^p} L(x,y) + r^\intercal \nabla_{x} L(x,y) \text{ subject to }  ||r||_\infty \le \epsilon
+\end{equation}
+Since we need to maximize the $r$ but with a contraint of the infinity norm of $r$ less than or equal to $\epsilon$, 
+those are our two conditions we need to account for. 
+
+We can simplify the optimization problem to:
+\begin{equation}
+    r^\ast \in argmax_{r \in \mathbb{R}^p} r^\intercal \nabla_{x} L(x,y) \text{ subject to }  ||r||_\infty \le \epsilon
+\end{equation}
+
+since the lone term $ L(x,y) $ is irrelevant to the optimization problem of $ r $.
+
+We break down $ ||r||_\infty \le \epsilon $ to $ max_{i = 0, 1, 2, ... , p}|r_i| \le \epsilon $. 
+This means that $ -\epsilon \le r_{i} \le \epsilon $. We can break this down into two equations $ -\epsilon \le r_{i} $ and $ r_{i} \le \epsilon $. 
+To simplify this further we have $ r_{i}+\epsilon \ge 0 $ and $r_{i}-\epsilon \ge 0 $, respectively, where $ i = 0, 1, 2, ..., p $. These two equations make up our inequality set.
+
+To prove the KKT conditions, we first set the Lagragian, $\Lagr(x,\lambda)$.
+The Lagragian Function is given as $\Lagr(x,\lambda) = f(x) - \sum_{i \in \mathcal{E} \cup \mathcal{I}}\lambda_{i}c_{i}(x)$.
+we can substitute our simplified objective function in place of the $f(x)$ in our Lagragian. 
+
+\begin{equation}
+    \Lagr(r,\lambda) = r^\intercal \nabla_{x} L(x,y) - \sum_{i \in \mathcal{E} \cup \mathcal{I}}\lambda_{i}c_{i}(x)
+\end{equation}
+
+Since we have two constraints, $c(x)$, in the form of $ r_{i}+\epsilon \ge 0 $ and $r_{i}-\epsilon \ge 0 $ we write the two different $\lambda$ and replace them $ \alpha_{i} \ge 0 $ and $ \beta_{i} \ge 0 $ (Dual Feasibility) with $ r_{i} + \epsilon \ge 0 $ and $ r_{i} - \epsilon \ge 0 $, respectively, 
+
+\begin{equation}
+    \Lagr(r,\alpha, \beta) = r^\intercal \nabla_{x} L(x,y) - \sum_{i=1}^{n} \alpha_{i} (r_{i} + \epsilon) - \sum_{i=1}^{n} \beta_{i} (r_{i} - \epsilon)
+\end{equation}
+
+To use KKT, We must satisfy 4 conditions:
+
+\begin{description}
+    \item [Stationarity] The gradient of the Lagragian is equal to zero.
+    \item [Primal Feasibility] All constraints are satisfied, either from the equality or inequality set.
+    \item [Dual Feasibility] All Lagrage multipliers are non-negative for inequality constraints.
+    \item [Complimentary Slackness] For each inequality constraint, the constraint is either active or inactive or the Lagrage multiplier is zero
+\end{description}
+
+First, we set the gradient of the Lagragian equal to zero.
+We find the gradient w.r.t $r$, our input, which results in this equation set to zero.
+
+\begin{equation}
+    \nabla_{r}\Lagr(r,\alpha, \beta) = \nabla_{x} L(x,y) + \alpha_{i} - \beta_{i} = 0
+\end{equation}
+
+For Primal Feasibility and Dual Feasibility, we will make sure the inequality constraints satisfied in the Complimentary Slackness part of the KKT conditions.
+We already stated that the Primal Feasibility is that $ r_{i}+\epsilon \ge 0 $ and $r_{i}-\epsilon \ge 0 $, where $ i = 0, 1, 2, ..., p $.
+The Dual Feasibility was also established by defining $ \alpha_{i} \ge 0 $ and $ \beta_{i} \ge 0 $. As long as we do not violate any of these conditions in 
+the Complimentary Slackness, the proof is valid.
+
+Complimentary Slackness demands that $\alpha_{i} (r_{i} + \epsilon) = 0$ and $\beta_{i} (r_{i} - \epsilon) = 0$
+There are only possible 3 scenarios: $ |r_{i}| < \epsilon$, $r_{i} = -\epsilon$, or $r_{i} = \epsilon$. 
+The other case, $ |r_{i}| > \epsilon$, violates the Primal Feasibility.
+
+If $|r_{i}| < \epsilon$, then $\alpha_{i} = 0$ and $\beta_{i} = 0$ 
+since $(r_{i} + \epsilon)$ and $(r_{i} - \epsilon)$ terms in $\alpha_{i} (r_{i} + \epsilon) = 0$ and $\beta_{i} (r_{i} - \epsilon) = 0$ are not equal to $0$
+This partially satisfies Complimentary Slackness, but Stationarity still needs to acheived. Since $\alpha_{i}$ and $\beta_{i}$ are 0,
+$\nabla_{r}\Lagr(r,\alpha, \beta) = \nabla_{x} L(x,y) + \alpha_{i} - \beta_{i} = 0$, this makes $\nabla_{x} L(x,y) = 0$. 
+
+If $r_{i} = -\epsilon$, then $\alpha_{i} \ge 0$, since $ (r_{i} + \epsilon) = 0 $ and $\beta_{i} = 0$, since $ (r_{i} - \epsilon) \ne 0$. To complete Stationarity, 
+$-\nabla_{x} L(x,y) = \alpha_{i} \ge 0$.
+
+If $r_{i} = \epsilon$, then $\_{i} \ge 0$, since $ (r_{i} - \epsilon) = 0 $ and $\alpha = 0$, since $ (r_{i} + \epsilon) \ne 0$. To complete Stationarity, 
+$\nabla_{x} L(x,y) = \beta_{i} \ge 0$.
+
+KKT Conditions give us that when $r_{i} = \epsilon$ then the constraint is active for $\alpha_{i}$, 
+when $r_{i} = -\epsilon$ then the constraint is active for $\beta_{i}$, 
+and when $|r_{i}| < \epsilon$ then the constraints are not active and can be ignored, since $\lambda_{i} = 0$.
+
+This means that when $\nabla_{x} L(x,y) > 0$, then $r_{i} = \epsilon$,
+and if  $\nabla_{x} L(x,y) < 0$, then $r_{i} = -\epsilon$.
+And the last case $\nabla_{x} L(x,y) = 0$ can be ignored setting $\epsilon$ to 0 as no constraints are active.
+
+This is representative of the sign function and $x\prime = x + r^\ast$ 
+can be expressed by $x\prime = x + \epsilon \cdot \sgn(\nabla_{x}L(x,y))$
+
+\end{document}
+
