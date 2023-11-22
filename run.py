@@ -5,19 +5,17 @@ import torch.optim as optim
 from torchvision import datasets, transforms
 import numpy as np
 import matplotlib.pyplot as plt
-import timeit
 from tqdm import tqdm
-
-start = timeit.default_timer()
+from tabulate import tabulate
 
 fgsm_epsilons = [0, .05, .1, .15, .2, .25, .3]
-# epsilons = [0]
-pgd_epsilons = [0, 15/255, 25/255, 35/255]
+pgd_epsilons = [0, 5/255, 15/255, 25/255, 35/255]
 # Parameters given in Assignment
 epsilon_param = 25/255
 alpha_param = 10/255
 max_iter = 15
 pretrained_model = "data/lenet_mnist_model.pth"
+num_test_samples = 1000
 # Set random seed for reproducibility
 torch.manual_seed(42)
 
@@ -54,6 +52,7 @@ test_loader = torch.utils.data.DataLoader(
             transforms.Normalize((0.1307,), (0.3081,)),
             ])),
         batch_size=1, shuffle=True)
+
 use_cuda = False
 use_mps = False
 # Define what device we are using
@@ -77,6 +76,26 @@ model.load_state_dict(torch.load(pretrained_model, map_location=device))
 
 # Set the model in evaluation mode. In this case this is for the Dropout layers
 model.eval()
+
+# restores the tensors to their original scale
+def denorm(batch, mean=[0.1307], std=[0.3081]):
+    """
+    Convert a batch of tensors to their original scale.
+
+    Args:
+        batch (torch.Tensor): Batch of normalized tensors.
+        mean (torch.Tensor or list): Mean used for normalization.
+        std (torch.Tensor or list): Standard deviation used for normalization.
+
+    Returns:
+        torch.Tensor: batch of tensors without normalization applied to them.
+    """
+    if isinstance(mean, list):
+        mean = torch.tensor(mean).to(device)
+    if isinstance(std, list):
+        std = torch.tensor(std).to(device)
+
+    return batch * std.view(1, -1, 1, 1) + mean.view(1, -1, 1, 1)
 
 # FGSM attack code
 def fgsm_attack(model, loss_fn, image, label, epsilon):
@@ -116,67 +135,57 @@ def fgsm_attack(model, loss_fn, image, label, epsilon):
 def pgd_attack(model, loss_fn, image, label, epsilon, max_iter, alpha):
     # epsilon is based on inf norm
 
-    # Haven't applied perturbations yet but used as a copy for the loop
-    perturbed_image = image
     # Create a random adversarial target that is different from current target label
     adv_target = label
     while adv_target == label:
         adv_target = torch.floor(torch.rand(1)*(10)).type(torch.LongTensor)
-    
+
     # Repeat PGD until end condition or max iter
     for i in range(max_iter):
-        output = model(perturbed_image)
+        image.requires_grad = True
+        output = model(image)
 
         if i == 0:
             # Store initial prediction of non perturbed image
             init_pred = output.max(1, keepdim=True)[1] # get the index of the max log-probability
             # If the initial prediction is wrong, don't bother attacking, just move on
             if init_pred != label.item():
-                return init_pred, perturbed_image
+                return init_pred, image
+            
+        # Calculate the loss
+        loss = loss_fn(output, adv_target)
 
+        # Zero all existing gradients
         model.zero_grad()
-        loss = loss_fn(output, adv_target).to(device)
-        loss.backward(retain_graph=True)
-        perturbed_image = denorm(perturbed_image)
+
+        # Calculate gradients of model in backward pass
+        loss.backward()
+
+        # Get 'datagrad'
+        datagrad = image.grad.data
+
+        # Return image to its original format
+        image = denorm(image).detach_()
 
         # Collect the element-wise sign of the data gradient
-        sign_grad = perturbed_image.sign()
+        sign_grad = datagrad.sign()
+
         # Create the perturbed image by adjusting each pixel of the input image
-        perturbed_image = perturbed_image + alpha*sign_grad
+        adv_image = image + alpha*sign_grad
+
         # Keep perturbations under epsilon value
-        inf_norm = abs(torch.linalg.vector_norm(torch.reshape(perturbed_image - image, (28,28)), ord=np.inf))
+        inf_norm = abs(torch.linalg.matrix_norm(adv_image - image, float('inf')))
         if inf_norm > epsilon:
-            perturbations = torch.clip(perturbed_image - image, min=-epsilon, max=+epsilon)
+            perturbations = torch.clip(adv_image - image, min=-epsilon, max=+epsilon)
         else:
             break
+
         # Adding perturbations to image and clipping to maintain [0,1] range
-        perturbed_image = torch.clamp(perturbed_image + perturbations, 0, 1)
-        # Renormalize perturbed image for new gradient
-        perturbed_image = transforms.Normalize((0.1307,), (0.3081,))(perturbed_image)
-
-
+        image = torch.clamp(image + perturbations, 0, 1).detach_()
+        # Normalize new image to feed back into the model
+        image = transforms.Normalize((0.1307,), (0.3081,))(image)
     # Return the perturbed image
-    return init_pred, perturbed_image
-
-# restores the tensors to their original scale
-def denorm(batch, mean=[0.1307], std=[0.3081]):
-    """
-    Convert a batch of tensors to their original scale.
-
-    Args:
-        batch (torch.Tensor): Batch of normalized tensors.
-        mean (torch.Tensor or list): Mean used for normalization.
-        std (torch.Tensor or list): Standard deviation used for normalization.
-
-    Returns:
-        torch.Tensor: batch of tensors without normalization applied to them.
-    """
-    if isinstance(mean, list):
-        mean = torch.tensor(mean).to(device)
-    if isinstance(std, list):
-        std = torch.tensor(std).to(device)
-
-    return batch * std.view(1, -1, 1, 1) + mean.view(1, -1, 1, 1)
+    return init_pred, image
 
 def fgsm_test( model, device, test_loader, epsilon ):
 
@@ -184,9 +193,11 @@ def fgsm_test( model, device, test_loader, epsilon ):
     correct = 0
     adv_examples = []
     index = 0
+    test_loader_iter = iter(test_loader)
         
-    # Loop over all examples in test set
-    for data, target in tqdm(test_loader):
+    # Loop over first 1000 examples in test set
+    for i in tqdm(range(num_test_samples)):
+        data, target = next(test_loader_iter)
 
         # Send the data and label to the device
         data, target = data.to(device), target.to(device)
@@ -218,8 +229,8 @@ def fgsm_test( model, device, test_loader, epsilon ):
                 adv_examples.append( (init_pred.item(), final_pred.item(), adv_ex) )
 
     # Calculate final accuracy for this epsilon
-    final_acc = correct/float(len(test_loader))
-    print(f"Epsilon: {epsilon}\tTest Accuracy = {correct} / {len(test_loader)} = {final_acc}")
+    final_acc = correct/float(num_test_samples)
+    print(f"Epsilon: {epsilon}\tTest Accuracy = {correct} / {num_test_samples} = {final_acc}")
 
     # Return the accuracy and an adversarial example
     return final_acc, adv_examples
@@ -230,9 +241,11 @@ def pgd_test( model, device, test_loader, epsilon ):
     correct = 0
     adv_examples = []
     index = 0
+    test_loader_iter = iter(test_loader)
         
-    # Loop over all examples in test set
-    for data, target in tqdm(test_loader):
+    # Loop over first 1000 examples in test set
+    for i in tqdm(range(num_test_samples)):
+        data, target = next(test_loader_iter)
 
         # Send the data and label to the device
         data, target = data.to(device), target.to(device)
@@ -265,8 +278,8 @@ def pgd_test( model, device, test_loader, epsilon ):
                 adv_examples.append( (init_pred.item(), final_pred.item(), adv_ex) )
 
     # Calculate final accuracy for this epsilon
-    final_acc = correct/float(len(test_loader))
-    print(f"Epsilon: {epsilon}\tTest Accuracy = {correct} / {len(test_loader)} = {final_acc}")
+    final_acc = correct/float(num_test_samples)
+    print(f"Epsilon: {epsilon}\tTest Accuracy = {correct} / {num_test_samples} = {final_acc}")
 
     # Return the accuracy and an adversarial example
     return final_acc, adv_examples
@@ -274,36 +287,76 @@ def pgd_test( model, device, test_loader, epsilon ):
 fgsm_accuracies = []
 fgsm_examples = []
 
-pgd_accuracies = []
-pgd_examples = []
-
-
 # Run test for each epsilon for fgsm
 print("FGSM")
-for eps in epsilons:
+for eps in fgsm_epsilons:
     acc, ex = fgsm_test(model, device, test_loader, eps)
 
     fgsm_accuracies.append(acc)
     fgsm_examples.append(ex)
 
-# print("PGD")
-# for eps in epsilons:
-#     acc, ex = pgd_test(model, device, test_loader, eps)
+pgd_accuracies = []
+pgd_examples = []
 
-#     pgd_accuracies.append(acc)
-#     pgd_examples.append(ex)
-end = timeit.default_timer()
+print("PGD")
+for eps in pgd_epsilons:
+    acc, ex = pgd_test(model, device, test_loader, eps)
 
-print("elapsed time: ", end - start)
+    pgd_accuracies.append(acc)
+    pgd_examples.append(ex)
 
-plt.figure(figsize=(5,5))
-plt.plot(epsilons, fgsm_accuracies, "*-")
-# plt.plot(epsilons, pgd_accuracies, "-")
-# plt.legend()
-plt.yticks(np.arange(0, 1.1, step=0.1))
-plt.xticks(np.arange(0, .35, step=0.05))
-plt.title("Accuracy vs Epsilon for FGSM and PGD")
-plt.xlabel("Epsilon")
-plt.ylabel("Accuracy")
-
+# Plot several examples of adversarial samples at each epsilon
+cnt = 0
+plt.figure(figsize=(8,10))
+for i in range(len(fgsm_epsilons)):
+    for j in range(len(fgsm_examples[i])):
+        cnt += 1
+        plt.subplot(len(fgsm_epsilons),len(fgsm_examples[0]),cnt)
+        plt.xticks([], [])
+        plt.yticks([], [])
+        if j == 0:
+            plt.ylabel(f"Eps: {fgsm_epsilons[i]}", fontsize=14)
+        orig,adv,ex = fgsm_examples[i][j]
+        plt.title(f"{orig} -> {adv}")
+        plt.imshow(ex, cmap="gray")
+plt.tight_layout()
 plt.show()
+
+# Plot several examples of adversarial samples at each epsilon
+cnt = 0
+plt.figure(figsize=(8,10))
+for i in range(len(pgd_epsilons)):
+    for j in range(len(pgd_examples[i])):
+        cnt += 1
+        plt.subplot(len(pgd_epsilons),len(pgd_examples[0]),cnt)
+        plt.xticks([], [])
+        plt.yticks([], [])
+        if j == 0:
+            plt.ylabel(f"Eps: {pgd_epsilons[i]}", fontsize=14)
+        orig,adv,ex = pgd_examples[i][j]
+        plt.title(f"{orig} -> {adv}")
+        plt.imshow(ex, cmap="gray")
+plt.tight_layout()
+plt.show()
+
+aggr_data = []
+
+for i in range(len(fgsm_accuracies)):
+    data = []
+    data.append("FGSM")
+    data.append(fgsm_epsilons[i])
+    data.append("NONE")
+    data.append(fgsm_accuracies[i])
+    aggr_data.append(data)
+
+
+for i in range(len(pgd_accuracies)):
+    data = []
+    data.append("PGD")
+    data.append(pgd_epsilons[i])
+    data.append(alpha_param)
+    data.append(pgd_accuracies[i])
+    aggr_data.append(data)
+
+
+print(tabulate(aggr_data, headers=['Type', 'Epsilon', 'Alpha', 'Accuracy']))
