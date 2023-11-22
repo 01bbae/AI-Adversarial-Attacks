@@ -2,6 +2,8 @@
 
 This repository contains the implementation of Fast Gradient Sign Method (FGSM) and Projected Gradient Descent (PGD) and analysis. It also contains the proof for FGSM using KKT conditions.
 
+The purpose of using the adversarial attacks was to fool LeNet to incorrectly classify MNIST data to an untargeted attack label with small perturbations in the image.
+
 FGSM was taken from PyTorch's documentation here: https://pytorch.org/tutorials/beginner/fgsm_tutorial.html
 
 The PGD algorithm and comparison table were self-implemented.
